@@ -69,12 +69,9 @@ impl MqttManager {
     fn create_client_options(
         config: &MqttClientConfig,
     ) -> (mqtt::CreateOptions, mqtt::ConnectOptions) {
-        let topics: Vec<String> = DFLT_TOPICS.iter().map(|s| s.to_string()).collect();
-
         let create_opts = mqtt::CreateOptionsBuilder::new()
             .server_uri(config.address.to_string())
             .client_id(config.name.to_string())
-            .user_data(Box::new(RwLock::new(topics)))
             .finalize();
 
         let conn_opts = mqtt::ConnectOptionsBuilder::new()
@@ -104,18 +101,14 @@ impl MqttManager {
 
     fn on_connect_success(client: &mqtt::AsyncClient, _msgid: u16) {
         println!("Connection succeeded");
-        let data = client.user_data().unwrap();
+        let topics: Vec<String> = DFLT_TOPICS.iter().map(|s| s.to_string()).collect();
+        println!("Subscribing to topics: {:?}", topics);
 
-        if let Some(lock) = data.downcast_ref::<UserTopics>() {
-            let topics = lock.read().unwrap();
-            println!("Subscribing to topics: {:?}", topics);
-
-            // Create a QoS vector, same len as # topics
-            let qos = vec![QOS; topics.len()];
-            // Subscribe to the desired topic(s).
-            client.subscribe_many(&topics, &qos);
-            // TODO: This doesn't yet handle a failed subscription.
-        }
+        // Create a QoS vector, same len as # topics
+        let qos = vec![QOS; topics.len()];
+        // Subscribe to the desired topic(s).
+        client.subscribe_many(&topics, &qos);
+        // TODO: This doesn't yet handle a failed subscription.
     }
 
     fn on_connect_failure(cli: &mqtt::AsyncClient, _msgid: u16, rc: i32) {
