@@ -1,9 +1,10 @@
 mod mqtt_manager;
+mod sensor_manager;
 
-use std::{process, thread, time::Duration, fs};
 use mqtt_manager::MqttClientConfigs;
+use std::{fs, process, thread, time::Duration};
 
-fn load_mqtt_client_config() -> Result<MqttClientConfigs,serde_json::Error>{
+fn load_mqtt_client_config() -> Result<MqttClientConfigs, serde_json::Error> {
     let config = fs::read_to_string("config.json").expect("Unable to read config.json!");
     println!("{}", config);
 
@@ -15,15 +16,16 @@ fn main() {
     // Initialize the logger from the environment
     env_logger::init();
 
-    let clients_config = load_mqtt_client_config().expect("Error loading mqtt client config from config.json!");
+    let clients_config =
+        load_mqtt_client_config().expect("Error loading mqtt client config from config.json!");
 
-    let client = mqtt_manager::MqttManager::new(clients_config);
+    let mqtt_manager = mqtt_manager::MqttManager::new(clients_config);
 
     // ^C handler will stop the consumer, breaking us out of the loop, below
-    let mut ctrlc_cli = client.clone();
+    //let mut ctrlc_cli = mqtt_manager.clone();
     ctrlc::set_handler(move || {
-        println!("Disconnecting...");
-        ctrlc_cli.disconnect();
+        //println!("Disconnecting...");
+        //ctrlc_cli.disconnect();
         thread::sleep(Duration::from_millis(100));
         process::exit(0);
     })
