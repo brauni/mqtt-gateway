@@ -1,7 +1,13 @@
+use chrono::{DateTime, Local};
 use mqtt::Message;
-use paho_mqtt as mqtt;
+use paho_mqtt::{self as mqtt, ConnectOptions};
 use serde::{Deserialize, Serialize};
-use std::{process, sync::RwLock, thread, time::Duration};
+use std::{
+    process,
+    sync::{Mutex, RwLock},
+    thread,
+    time::{Duration, SystemTime},
+};
 
 use crate::sensor_manager::{self, SensorManager};
 
@@ -46,41 +52,74 @@ impl MqttManager {
     }
 
     fn create_mqtt_client(config: &MqttClientConfig) -> mqtt::AsyncClient {
-        let (create_opts, conn_opts) = MqttManager::create_client_options(&config);
+        let create_opts = MqttManager::create_client_options(&config);
 
         let client = mqtt::AsyncClient::new(create_opts).unwrap_or_else(|e| {
             println!("Error creating the client: {:?}", e);
             process::exit(1);
         });
 
-        client.set_connected_callback(MqttManager::on_connected);
-        client.set_connection_lost_callback(MqttManager::on_connection_lost);
-        client.set_message_callback(MqttManager::on_message_received);
+        // client.set_connected_callback(MqttManager::on_connected);
+        // client.set_connection_lost_callback(MqttManager::on_connection_lost);
+        // client.set_message_callback(MqttManager::on_message_received);
 
-        println!("{} connecting to the MQTT broker...", client.client_id());
-        client.connect_with_callbacks(
-            conn_opts,
-            MqttManager::on_connect_success,
-            MqttManager::on_connect_failure,
-        );
+        // println!("{} connecting to the MQTT broker...", client.client_id());
+        // client.connect_with_callbacks(
+        //     client
+        //         .user_data()
+        //         .unwrap()
+        //         .downcast_ref::<ConnectOptions>()
+        //         .unwrap()
+        //         .clone(),
+        //     MqttManager::on_connect_success,
+        //     MqttManager::on_connect_failure,
+        // );
+
+        println!("create_mqtt_client ThreadId: {}", thread_id::get());
         return client;
     }
 
-    fn create_client_options(
-        config: &MqttClientConfig,
-    ) -> (mqtt::CreateOptions, mqtt::ConnectOptions) {
-        let create_opts = mqtt::CreateOptionsBuilder::new()
-            .server_uri(config.address.to_string())
-            .client_id(config.name.to_string())
-            .finalize();
-
+    fn create_client_options(config: &MqttClientConfig) -> mqtt::CreateOptions {
         let conn_opts = mqtt::ConnectOptionsBuilder::new()
             .keep_alive_interval(Duration::from_secs(20))
             .user_name(config.user.to_string())
             .password(config.password.to_string())
             .finalize();
 
-        return (create_opts, conn_opts);
+        let create_opts = mqtt::CreateOptionsBuilder::new()
+            .server_uri(config.address.to_string())
+            .client_id(config.name.to_string())
+            .user_data(Box::new(conn_opts))
+            .finalize();
+
+        return create_opts;
+    }
+
+    pub fn connect_clients(self) {
+        for client in self.clients.iter() {
+            client.set_connected_callback(MqttManager::on_connected);
+            client.set_connection_lost_callback(MqttManager::on_connection_lost);
+            client.set_message_callback(MqttManager::on_message_received);
+
+            println!("{} connecting to the MQTT broker...", client.client_id());
+            println!("ThreadId: {}", thread_id::get());
+
+            let data = client.user_data();
+            let opts = data.unwrap().downcast_ref::<ConnectOptions>().unwrap();
+
+            // if let Err(err) =
+            client.connect_with_callbacks(
+                opts.clone(),
+                MqttManager::on_connect_success,
+                MqttManager::on_connect_failure,
+            );
+            //     .wait()
+            // {
+            //     eprintln!("Unable to connect {}: {}", client.client_id(), err);
+            //     process::exit(1);
+            // }
+            thread::sleep(Duration::from_millis(3000));
+        }
     }
 
     fn on_connection_lost(client: &mqtt::AsyncClient) {
@@ -126,7 +165,16 @@ impl MqttManager {
             let payload_str = msg.payload_str();
 
             if topic.starts_with("sensor/temperature/") {
-                println!("{}: {} - {}", client.client_id(), topic, payload_str);
+                let system_time = SystemTime::now();
+                let datetime: DateTime<Local> = system_time.into();
+                println!(
+                    "{}: {} - {} {}",
+                    client.client_id(),
+                    topic,
+                    payload_str,
+                    datetime.format("%H:%M:%S")
+                );
+                println!("ThreadId: {}", thread_id::get());
                 MqttManager::received_sensor_temperature(payload_str.into_owned(), topic);
             } else if topic.starts_with("datalogger/temperature/") {
                 println!("{}: {} - {}", client.client_id(), topic, payload_str);

@@ -15,11 +15,13 @@ fn load_mqtt_client_config() -> Result<MqttClientConfigs, serde_json::Error> {
 fn main() {
     // Initialize the logger from the environment
     env_logger::init();
+    println!("ThreadId: {}", thread_id::get());
 
     let clients_config =
         load_mqtt_client_config().expect("Error loading mqtt client config from config.json!");
 
     let mqtt_manager = mqtt_manager::MqttManager::new(clients_config);
+    mqtt_manager.connect_clients();
 
     // ^C handler will stop the consumer, breaking us out of the loop, below
     //let mut ctrlc_cli = mqtt_manager.clone();
