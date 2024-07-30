@@ -1,5 +1,5 @@
 use chrono::{DateTime, Local};
-use paho_mqtt::{self as mqtt, ConnectOptions};
+use paho_mqtt::{self as mqtt, AsyncClient, ConnectOptions};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::thread;
@@ -103,18 +103,25 @@ impl MqttClient {
         self.client
             .connect_with_callbacks(
                 opts.clone(),
-                move |client, _| {
-                    println!("Connection succeeded");
-                    client.subscribe("#", 1);
-                },
-                move |client, _, rc| {
-                    println!("Connection attempt failed with error code {}.\n", rc);
-                    thread::sleep(Duration::from_millis(2500));
-                    client.reconnect();
-                },
+                MqttClient::on_connect_succeeded,
+                MqttClient::on_connect_failed,
             )
             .wait()?;
         Ok(())
+    }
+
+    fn on_connect_succeeded(client: &AsyncClient, _: u16) {
+        println!("Connection succeeded");
+        client.subscribe("#", 1);
+    }
+
+    fn on_connect_failed(client: &AsyncClient, _: u16, rc: i32) {
+        println!("Connection attempt failed with error code {}.\n", rc);
+        thread::sleep(Duration::from_millis(5000));
+        client.reconnect_with_callbacks(
+            MqttClient::on_connect_succeeded,
+            MqttClient::on_connect_failed,
+        );
     }
 
     fn disconnect(&self) -> Result<(), mqtt::Error> {
