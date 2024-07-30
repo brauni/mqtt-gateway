@@ -1,31 +1,11 @@
 use chrono::{DateTime, Local};
-use mqtt::Message;
 use paho_mqtt::{self as mqtt, ConnectOptions};
 use serde::{Deserialize, Serialize};
-use std::{
-    process,
-    sync::{Mutex, RwLock},
-    thread,
-    time::{Duration, SystemTime},
-};
+use std::collections::HashMap;
+use std::thread;
+use std::time::{Duration, SystemTime};
 
 use crate::sensor_manager::{self, SensorManager};
-
-const DFLT_TOPICS: &[&str] = &["#"];
-const QOS: i32 = 1;
-
-type UserTopics = RwLock<Vec<String>>;
-
-//#[derive(Clone)]
-pub struct MqttManager {
-    clients: Vec<mqtt::AsyncClient>,
-    sensor_manager: SensorManager,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct MqttClientConfigs {
-    mqtt_clients: Vec<MqttClientConfig>,
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 struct MqttClientConfig {
@@ -36,47 +16,26 @@ struct MqttClientConfig {
     password: String,
 }
 
-impl MqttManager {
-    pub fn new(client_configs: MqttClientConfigs) -> Self {
-        let mut clients_vector: Vec<mqtt::AsyncClient> = vec![];
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MqttClientConfigs {
+    mqtt_clients: Vec<MqttClientConfig>,
+}
 
-        for config in client_configs.mqtt_clients {
-            let client = MqttManager::create_mqtt_client(&config);
-            clients_vector.push(client);
-        }
+pub struct MqttClient {
+    client: mqtt::AsyncClient,
+    sensor_manager: SensorManager,
+}
 
-        MqttManager {
-            clients: clients_vector,
+impl MqttClient {
+    fn new(config: &MqttClientConfig) -> Self {
+        let create_opts = MqttClient::create_client_options(&config);
+
+        let client = mqtt::AsyncClient::new(create_opts).unwrap();
+
+        MqttClient {
+            client,
             sensor_manager: SensorManager::new(),
         }
-    }
-
-    fn create_mqtt_client(config: &MqttClientConfig) -> mqtt::AsyncClient {
-        let create_opts = MqttManager::create_client_options(&config);
-
-        let client = mqtt::AsyncClient::new(create_opts).unwrap_or_else(|e| {
-            println!("Error creating the client: {:?}", e);
-            process::exit(1);
-        });
-
-        // client.set_connected_callback(MqttManager::on_connected);
-        // client.set_connection_lost_callback(MqttManager::on_connection_lost);
-        // client.set_message_callback(MqttManager::on_message_received);
-
-        // println!("{} connecting to the MQTT broker...", client.client_id());
-        // client.connect_with_callbacks(
-        //     client
-        //         .user_data()
-        //         .unwrap()
-        //         .downcast_ref::<ConnectOptions>()
-        //         .unwrap()
-        //         .clone(),
-        //     MqttManager::on_connect_success,
-        //     MqttManager::on_connect_failure,
-        // );
-
-        println!("create_mqtt_client ThreadId: {}", thread_id::get());
-        return client;
     }
 
     fn create_client_options(config: &MqttClientConfig) -> mqtt::CreateOptions {
@@ -95,98 +54,72 @@ impl MqttManager {
         return create_opts;
     }
 
-    pub fn connect_clients(self) {
-        for client in self.clients.iter() {
-            client.set_connected_callback(MqttManager::on_connected);
-            client.set_connection_lost_callback(MqttManager::on_connection_lost);
-            client.set_message_callback(MqttManager::on_message_received);
+    fn connect(&self) -> Result<(), mqtt::Error> {
+        self.client.set_connected_callback(move |client| {
+            println!("Client {} connected", client.client_id());
+        });
+        self.client.set_connection_lost_callback(move |client| {
+            println!("Client {} connection lost", client.client_id());
+        });
+        self.client.set_message_callback(move |client, msg| {
+            if let Some(msg) = msg {
+                let topic = msg.topic().to_owned();
+                let payload_str = msg.payload_str();
 
-            println!("{} connecting to the MQTT broker...", client.client_id());
-            println!("ThreadId: {}", thread_id::get());
-
-            let data = client.user_data();
-            let opts = data.unwrap().downcast_ref::<ConnectOptions>().unwrap();
-
-            // if let Err(err) =
-            client.connect_with_callbacks(
-                opts.clone(),
-                MqttManager::on_connect_success,
-                MqttManager::on_connect_failure,
-            );
-            //     .wait()
-            // {
-            //     eprintln!("Unable to connect {}: {}", client.client_id(), err);
-            //     process::exit(1);
-            // }
-            thread::sleep(Duration::from_millis(3000));
-        }
-    }
-
-    fn on_connection_lost(client: &mqtt::AsyncClient) {
-        println!(
-            "{} connection lost. Attempting reconnect.",
-            client.client_id()
-        );
-        thread::sleep(Duration::from_millis(2500));
-        client.reconnect_with_callbacks(
-            MqttManager::on_connect_success,
-            MqttManager::on_connect_failure,
-        );
-    }
-
-    fn on_connected(client: &mqtt::AsyncClient) {
-        println!("{} connected.", client.client_id());
-    }
-
-    fn on_connect_success(client: &mqtt::AsyncClient, _msgid: u16) {
-        println!("Connection succeeded");
-        let topics: Vec<String> = DFLT_TOPICS.iter().map(|s| s.to_string()).collect();
-        println!("Subscribing to topics: {:?}", topics);
-
-        // Create a QoS vector, same len as # topics
-        let qos = vec![QOS; topics.len()];
-        // Subscribe to the desired topic(s).
-        client.subscribe_many(&topics, &qos);
-        // TODO: This doesn't yet handle a failed subscription.
-    }
-
-    fn on_connect_failure(cli: &mqtt::AsyncClient, _msgid: u16, rc: i32) {
-        println!("Connection attempt failed with error code {}.\n", rc);
-        thread::sleep(Duration::from_millis(2500));
-        cli.reconnect_with_callbacks(
-            MqttManager::on_connect_success,
-            MqttManager::on_connect_failure,
-        );
-    }
-
-    fn on_message_received(client: &mqtt::AsyncClient, msg: Option<Message>) {
-        if let Some(msg) = msg {
-            let topic = msg.topic().to_owned();
-            let payload_str = msg.payload_str();
-
-            if topic.starts_with("sensor/temperature/") {
-                let system_time = SystemTime::now();
-                let datetime: DateTime<Local> = system_time.into();
-                println!(
-                    "{}: {} - {} {}",
-                    client.client_id(),
-                    topic,
-                    payload_str,
-                    datetime.format("%H:%M:%S")
-                );
-                println!("ThreadId: {}", thread_id::get());
-                MqttManager::received_sensor_temperature(payload_str.into_owned(), topic);
-            } else if topic.starts_with("datalogger/temperature/") {
-                println!("{}: {} - {}", client.client_id(), topic, payload_str);
-                match payload_str.as_ref() {
-                    "get" => println!("get"), // TODO: publish all stored sensor values
-                    "get_valid" => println!("get_valid"),
-                    _ => println!("default"),
+                if topic.starts_with("sensor/temperature/") {
+                    let system_time = SystemTime::now();
+                    let datetime: DateTime<Local> = system_time.into();
+                    println!(
+                        "{}: {} - {} {}",
+                        client.client_id(),
+                        topic,
+                        payload_str,
+                        datetime.format("%H:%M:%S")
+                    );
+                    println!("ThreadId: {}", thread_id::get());
+                    MqttClient::received_sensor_temperature(payload_str.into_owned(), topic);
+                } else if topic.starts_with("datalogger/temperature/") {
+                    println!("{}: {} - {}", client.client_id(), topic, payload_str);
+                    match payload_str.as_ref() {
+                        "get" => println!("get"), // TODO: publish all stored sensor values
+                        "get_valid" => println!("get_valid"),
+                        _ => println!("default"),
+                    }
+                } else {
+                    println!("{} - {}", topic, payload_str);
                 }
-            } else {
-                println!("{} - {}", topic, payload_str);
             }
-        }
+        });
+
+        println!(
+            "{} connecting to the MQTT broker...",
+            self.client.client_id()
+        );
+        println!("ThreadId: {}", thread_id::get());
+
+        let data = self.client.user_data();
+        let opts = data.unwrap().downcast_ref::<ConnectOptions>().unwrap();
+
+        self.client
+            .connect_with_callbacks(
+                opts.clone(),
+                move |client, _| {
+                    println!("Connection succeeded");
+                    client.subscribe("#", 1);
+                },
+                move |client, _, rc| {
+                    println!("Connection attempt failed with error code {}.\n", rc);
+                    thread::sleep(Duration::from_millis(2500));
+                    client.reconnect();
+                },
+            )
+            .wait()?;
+        Ok(())
+    }
+
+    fn disconnect(&self) -> Result<(), mqtt::Error> {
+        self.client.disconnect(None).wait()?;
+        Ok(())
     }
 
     fn received_sensor_temperature(payload_str: String, topic: String) {
@@ -205,10 +138,39 @@ impl MqttManager {
 
         //self.sensor_manager.update_sensor(sensor_id, value, topic)
     }
+}
 
-    pub fn disconnect(&mut self) {
-        for client in self.clients.iter().cloned() {
-            client.disconnect(None);
+pub struct MqttManager {
+    clients: HashMap<String, MqttClient>,
+}
+
+impl MqttManager {
+    pub fn new() -> Self {
+        MqttManager {
+            clients: HashMap::new(),
         }
+    }
+
+    pub fn add_clients_from_config(&mut self, client_configs: MqttClientConfigs) {
+        for config in client_configs.mqtt_clients {
+            let client = MqttClient::new(&config);
+            self.clients.insert(config.name, client);
+        }
+    }
+
+    pub fn connect_all(&self) -> Result<(), mqtt::Error> {
+        for (id, client) in self.clients.iter() {
+            println!("Connecting client: {}", id);
+            client.connect()?;
+        }
+        Ok(())
+    }
+
+    pub fn disconnect_all(&self) -> Result<(), mqtt::Error> {
+        for (id, client) in self.clients.iter() {
+            println!("Disconnecting client: {}", id);
+            client.disconnect()?;
+        }
+        Ok(())
     }
 }
