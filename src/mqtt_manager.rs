@@ -1,5 +1,6 @@
 use chrono::{DateTime, Local};
-use paho_mqtt::{self as mqtt, AsyncClient, ConnectOptions};
+use log::{debug, error, info, warn};
+use paho_mqtt::{self as mqtt, AsyncClient, ConnectOptions, Message, Receiver};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::thread;
@@ -20,6 +21,8 @@ struct MqttClientConfig {
 pub struct MqttClientConfigs {
     mqtt_clients: Vec<MqttClientConfig>,
 }
+
+const TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct MqttClient {
     client: mqtt::AsyncClient,
@@ -56,11 +59,21 @@ impl MqttClient {
 
     fn connect(&self) -> Result<(), mqtt::Error> {
         self.client.set_connected_callback(move |client| {
-            println!("Client {} connected", client.client_id());
+            info!("Client {} connected", client.client_id());
         });
+
         self.client.set_connection_lost_callback(move |client| {
-            println!("Client {} connection lost", client.client_id());
+            warn!("Client {} connection lost", client.client_id());
+            thread::sleep(Duration::from_millis(1000));
+            client
+                .reconnect_with_callbacks(
+                    MqttClient::on_connect_succeeded,
+                    MqttClient::on_connect_failed,
+                )
+                .wait_for(TIMEOUT)
+                .unwrap();
         });
+
         self.client.set_message_callback(move |client, msg| {
             if let Some(msg) = msg {
                 let topic = msg.topic().to_owned();
@@ -69,33 +82,33 @@ impl MqttClient {
                 if topic.starts_with("sensor/temperature/") {
                     let system_time = SystemTime::now();
                     let datetime: DateTime<Local> = system_time.into();
-                    println!(
+                    info!(
                         "{}: {} - {} {}",
                         client.client_id(),
                         topic,
                         payload_str,
                         datetime.format("%H:%M:%S")
                     );
-                    println!("ThreadId: {}", thread_id::get());
+                    debug!("ThreadId: {}", thread_id::get());
                     MqttClient::received_sensor_temperature(payload_str.into_owned(), topic);
                 } else if topic.starts_with("datalogger/temperature/") {
-                    println!("{}: {} - {}", client.client_id(), topic, payload_str);
+                    info!("{}: {} - {}", client.client_id(), topic, payload_str);
                     match payload_str.as_ref() {
                         "get" => println!("get"), // TODO: publish all stored sensor values
                         "get_valid" => println!("get_valid"),
                         _ => println!("default"),
                     }
                 } else {
-                    println!("{} - {}", topic, payload_str);
+                    info!("{} - {}", topic, payload_str);
                 }
             }
         });
 
-        println!(
+        info!(
             "{} connecting to the MQTT broker...",
             self.client.client_id()
         );
-        println!("ThreadId: {}", thread_id::get());
+        debug!("ThreadId: {}", thread_id::get());
 
         let data = self.client.user_data();
         let opts = data.unwrap().downcast_ref::<ConnectOptions>().unwrap();
@@ -106,26 +119,29 @@ impl MqttClient {
                 MqttClient::on_connect_succeeded,
                 MqttClient::on_connect_failed,
             )
-            .wait()?;
+            .wait_for(TIMEOUT)?;
         Ok(())
     }
 
     fn on_connect_succeeded(client: &AsyncClient, _: u16) {
-        println!("Connection succeeded");
+        info!("Connection succeeded");
         client.subscribe("#", 1);
     }
 
     fn on_connect_failed(client: &AsyncClient, _: u16, rc: i32) {
-        println!("Connection attempt failed with error code {}.\n", rc);
+        error!("Connection attempt failed with error code {}.\n", rc);
         thread::sleep(Duration::from_millis(5000));
-        client.reconnect_with_callbacks(
-            MqttClient::on_connect_succeeded,
-            MqttClient::on_connect_failed,
-        );
+        client
+            .reconnect_with_callbacks(
+                MqttClient::on_connect_succeeded,
+                MqttClient::on_connect_failed,
+            )
+            .wait_for(TIMEOUT)
+            .unwrap();
     }
 
     fn disconnect(&self) -> Result<(), mqtt::Error> {
-        self.client.disconnect(None).wait()?;
+        self.client.disconnect(None).wait_for(TIMEOUT)?;
         Ok(())
     }
 
@@ -134,7 +150,7 @@ impl MqttClient {
         let value: f64 = collection[0].parse().unwrap();
         let sensor_id = collection[1].to_owned();
         let table_name: String = "tb_".to_owned() + &sensor_id;
-        println!("{} : {} - {}", value, sensor_id, table_name);
+        info!("Writing to DB {} : {} - {}", value, sensor_id, table_name);
 
         let db_connection = sqlite::open("temperature.db").unwrap();
         let query = format!("CREATE TABLE IF NOT EXISTS {} (id INT AUTO_INCREMENT PRIMARY KEY, Value FLOAT, TimeStamp DATETIME DEFAULT (datetime('now','localtime')))", table_name);
@@ -166,8 +182,9 @@ impl MqttManager {
     }
 
     pub fn connect_all(&self) -> Result<(), mqtt::Error> {
+        let mut receivers: HashMap<String, Receiver<Option<Message>>>;
         for (id, client) in self.clients.iter() {
-            println!("Connecting client: {}", id);
+            info!("Connecting client: {}", id);
             client.connect()?;
         }
         Ok(())
@@ -175,7 +192,7 @@ impl MqttManager {
 
     pub fn disconnect_all(&self) -> Result<(), mqtt::Error> {
         for (id, client) in self.clients.iter() {
-            println!("Disconnecting client: {}", id);
+            info!("Disconnecting client: {}", id);
             client.disconnect()?;
         }
         Ok(())

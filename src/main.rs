@@ -1,20 +1,22 @@
 mod mqtt_manager;
 mod sensor_manager;
 
+use log::{debug, info, warn};
 use mqtt_manager::MqttClientConfigs;
 use std::{fs, process, thread, time::Duration};
 
 fn load_mqtt_client_config() -> Result<MqttClientConfigs, serde_json::Error> {
     let config = fs::read_to_string("config.json").expect("Unable to read config.json!");
-    println!("{}", config);
+    info!("{}", config);
 
     let clients: MqttClientConfigs = serde_json::from_str(&config).unwrap();
     return Ok(clients);
 }
 
 fn main() {
+    std::env::set_var("RUST_LOG", "info");
     env_logger::init();
-    println!("ThreadId: {}", thread_id::get());
+    debug!("ThreadId: {}", thread_id::get());
 
     let clients_config =
         load_mqtt_client_config().expect("Error loading mqtt client config from config.json!");
