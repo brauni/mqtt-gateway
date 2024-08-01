@@ -65,13 +65,17 @@ impl MqttClient {
         self.client.set_connection_lost_callback(move |client| {
             warn!("Client {} connection lost", client.client_id());
             thread::sleep(Duration::from_millis(1000));
-            client
+            let reconnected = client
                 .reconnect_with_callbacks(
                     MqttClient::on_connect_succeeded,
                     MqttClient::on_connect_failed,
                 )
-                .wait_for(TIMEOUT)
-                .unwrap();
+                .wait_for(TIMEOUT); //TODO: handle Err result
+
+            match reconnected {
+                Ok(_) => {}
+                Err(e) => error!("Reconnect failed: {}", e),
+            }
         });
 
         self.client.set_message_callback(move |client, msg| {
@@ -124,20 +128,28 @@ impl MqttClient {
     }
 
     fn on_connect_succeeded(client: &AsyncClient, _: u16) {
-        info!("Connection succeeded");
+        info!("{} connection succeeded", client.client_id());
         client.subscribe("#", 1);
     }
 
     fn on_connect_failed(client: &AsyncClient, _: u16, rc: i32) {
-        error!("Connection attempt failed with error code {}.\n", rc);
+        error!(
+            "{} connection attempt failed with error code {}.\n",
+            client.client_id(),
+            rc
+        );
         thread::sleep(Duration::from_millis(5000));
-        client
+        let reconnected = client
             .reconnect_with_callbacks(
                 MqttClient::on_connect_succeeded,
                 MqttClient::on_connect_failed,
             )
-            .wait_for(TIMEOUT)
-            .unwrap();
+            .wait_for(TIMEOUT);
+
+        match reconnected {
+            Ok(_) => {}
+            Err(e) => error!("Reconnect failed: {}", e),
+        }
     }
 
     fn disconnect(&self) -> Result<(), mqtt::Error> {
