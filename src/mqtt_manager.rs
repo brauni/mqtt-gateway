@@ -62,18 +62,10 @@ impl MqttClient {
             info!("Client {} connected", client.client_id());
         });
 
-        info!("{} start consuming.", self.client.client_id());
         let receiver = self.client.start_consuming();
-
-        info!(
-            "{} connecting to the MQTT broker...",
-            self.client.client_id()
-        );
-        debug!("ThreadId: {}", thread_id::get());
 
         let data = self.client.user_data();
         let opts = data.unwrap().downcast_ref::<ConnectOptions>().unwrap();
-
         self.client
             .connect_with_callbacks(
                 opts.clone(),
@@ -109,23 +101,6 @@ impl MqttClient {
     fn disconnect(&self) -> Result<(), mqtt::Error> {
         self.client.disconnect(None).wait_for(TIMEOUT)?;
         Ok(())
-    }
-
-    fn received_sensor_temperature(payload_str: String, topic: String) {
-        let collection: Vec<&str> = payload_str.split("#").collect();
-        let value: f64 = collection[0].parse().unwrap();
-        let sensor_id = collection[1].to_owned();
-        let table_name: String = "tb_".to_owned() + &sensor_id;
-        info!("Writing to DB {} : {} - {}", value, sensor_id, table_name);
-
-        let db_connection = sqlite::open("temperature.db").unwrap();
-        let query = format!("CREATE TABLE IF NOT EXISTS {} (id INT AUTO_INCREMENT PRIMARY KEY, Value FLOAT, TimeStamp DATETIME DEFAULT (datetime('now','localtime')))", table_name);
-        db_connection.execute(query).unwrap();
-
-        let insert = format!("INSERT INTO {} (Value) VALUES ({});", table_name, value);
-        db_connection.execute(insert).unwrap();
-
-        //self.sensor_manager.update_sensor(sensor_id, value, topic)
     }
 }
 
@@ -165,5 +140,37 @@ impl MqttManager {
         Ok(())
     }
 
-    pub fn received_sensor_temperature(client_id: String, sensor_id: String, value: f64) {}
+    pub fn received_sensor_temperature(
+        &mut self,
+        client_id: String,
+        sensor_id: String,
+        value: f64,
+        topic: String,
+    ) {
+        let client: &mut MqttClient = self.clients.get_mut(&client_id).unwrap();
+        client.sensor_manager.update_sensor(sensor_id, value, topic)
+    }
+
+    pub fn publish_sensors_of_client(&self, client_id: String) {
+        let client = self.clients.get(&client_id).unwrap();
+        let sensors = client.sensor_manager.get_sensors();
+
+        for sensor in sensors.iter() {
+            info!(
+                "Publishing on {}: {} - {}",
+                client_id,
+                sensor.get_encoded_string(),
+                sensor.get_topic_string()
+            );
+            let msg = mqtt::MessageBuilder::new()
+                .topic(sensor.get_topic_string())
+                .payload(sensor.get_encoded_string())
+                .qos(1)
+                .finalize();
+
+            if let Err(e) = client.client.try_publish(msg) {
+                error!("{} error publishing message: {:?}", client_id, e);
+            }
+        }
+    }
 }
