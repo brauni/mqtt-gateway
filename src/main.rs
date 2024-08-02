@@ -23,7 +23,7 @@ fn main() {
 
     let mut mqtt_manager = mqtt_manager::MqttManager::new();
     mqtt_manager.add_clients_from_config(clients_config);
-    mqtt_manager.connect_all().unwrap();
+    let receivers = mqtt_manager.connect_all().unwrap();
 
     ctrlc::set_handler(move || {
         thread::sleep(Duration::from_millis(100));

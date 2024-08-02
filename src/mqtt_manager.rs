@@ -57,56 +57,13 @@ impl MqttClient {
         return create_opts;
     }
 
-    fn connect(&self) -> Result<(), mqtt::Error> {
+    fn connect(&self) -> Result<Receiver<Option<Message>>, mqtt::Error> {
         self.client.set_connected_callback(move |client| {
             info!("Client {} connected", client.client_id());
         });
 
-        self.client.set_connection_lost_callback(move |client| {
-            warn!("Client {} connection lost", client.client_id());
-            thread::sleep(Duration::from_millis(1000));
-            let reconnected = client
-                .reconnect_with_callbacks(
-                    MqttClient::on_connect_succeeded,
-                    MqttClient::on_connect_failed,
-                )
-                .wait_for(TIMEOUT); //TODO: handle Err result
-
-            match reconnected {
-                Ok(_) => {}
-                Err(e) => error!("Reconnect failed: {}", e),
-            }
-        });
-
-        self.client.set_message_callback(move |client, msg| {
-            if let Some(msg) = msg {
-                let topic = msg.topic().to_owned();
-                let payload_str = msg.payload_str();
-
-                if topic.starts_with("sensor/temperature/") {
-                    let system_time = SystemTime::now();
-                    let datetime: DateTime<Local> = system_time.into();
-                    info!(
-                        "{}: {} - {} {}",
-                        client.client_id(),
-                        topic,
-                        payload_str,
-                        datetime.format("%H:%M:%S")
-                    );
-                    debug!("ThreadId: {}", thread_id::get());
-                    MqttClient::received_sensor_temperature(payload_str.into_owned(), topic);
-                } else if topic.starts_with("datalogger/temperature/") {
-                    info!("{}: {} - {}", client.client_id(), topic, payload_str);
-                    match payload_str.as_ref() {
-                        "get" => println!("get"), // TODO: publish all stored sensor values
-                        "get_valid" => println!("get_valid"),
-                        _ => println!("default"),
-                    }
-                } else {
-                    info!("{} - {}", topic, payload_str);
-                }
-            }
-        });
+        info!("{} start consuming.", self.client.client_id());
+        let receiver = self.client.start_consuming();
 
         info!(
             "{} connecting to the MQTT broker...",
@@ -124,7 +81,8 @@ impl MqttClient {
                 MqttClient::on_connect_failed,
             )
             .wait_for(TIMEOUT)?;
-        Ok(())
+
+        Ok(receiver)
     }
 
     fn on_connect_succeeded(client: &AsyncClient, _: u16) {
@@ -193,13 +151,14 @@ impl MqttManager {
         }
     }
 
-    pub fn connect_all(&self) -> Result<(), mqtt::Error> {
-        let mut receivers: HashMap<String, Receiver<Option<Message>>>;
+    pub fn connect_all(&self) -> Result<HashMap<String, Receiver<Option<Message>>>, mqtt::Error> {
+        let mut receivers: HashMap<String, Receiver<Option<Message>>> = HashMap::new();
         for (id, client) in self.clients.iter() {
             info!("Connecting client: {}", id);
-            client.connect()?;
+            let receiver = client.connect()?;
+            receivers.insert(id.to_owned(), receiver);
         }
-        Ok(())
+        Ok(receivers)
     }
 
     pub fn disconnect_all(&self) -> Result<(), mqtt::Error> {
