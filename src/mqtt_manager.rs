@@ -91,11 +91,7 @@ impl MqttClient {
     }
 
     fn on_connect_failed(client: &AsyncClient, _: u16, rc: i32) {
-        error!(
-            "{} connection attempt failed with error code {}.\n",
-            client.client_id(),
-            rc
-        );
+        error!("{} connect failed, error code: {}", client.client_id(), rc);
         thread::sleep(Duration::from_millis(5000));
         let reconnected = client
             .reconnect_with_callbacks(
@@ -168,4 +164,6 @@ impl MqttManager {
         }
         Ok(())
     }
+
+    pub fn received_sensor_temperature(client_id: String, sensor_id: String, value: f64) {}
 }
