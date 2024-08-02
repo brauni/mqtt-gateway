@@ -61,7 +61,7 @@ fn received_mqtt_message(msg: Message, client_id: String, mqtt_manager: &mut Mqt
         );
         debug!("ThreadId: {}", thread_id::get());
         received_sensor_temperature(client_id, payload_str.into_owned(), topic, mqtt_manager);
-    } else if topic.starts_with("datalogger/temperature") {
+    } else if topic.starts_with("datalogger/temperature/command") {
         info!("{}: {} - {}", client_id, topic, payload_str);
         match payload_str.as_ref() {
             "get" => mqtt_manager.publish_sensors_of_client(client_id),

@@ -156,14 +156,15 @@ impl MqttManager {
         let sensors = client.sensor_manager.get_sensors();
 
         for sensor in sensors.iter() {
+            let topic = "datalogger/".to_owned() + &sensor.get_topic_string();
             info!(
                 "Publishing on {}: {} - {}",
                 client_id,
                 sensor.get_encoded_string(),
-                sensor.get_topic_string()
+                topic
             );
             let msg = mqtt::MessageBuilder::new()
-                .topic(sensor.get_topic_string())
+                .topic(topic)
                 .payload(sensor.get_encoded_string())
                 .qos(1)
                 .finalize();
