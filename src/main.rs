@@ -32,6 +32,22 @@ fn main() {
     .expect("Error setting Ctrl-C handler");
 
     loop {
+        for receiver in receivers.iter() {
+            match receiver.1.try_recv() {
+                Ok(msg) => match msg {
+                    Some(m) => {
+                        println!(
+                            "Received msg on {}: {} - {}",
+                            receiver.0,
+                            m.topic(),
+                            m.payload_str()
+                        )
+                    }
+                    None => {}
+                },
+                Err(_) => {}
+            }
+        }
         thread::sleep(Duration::from_millis(100));
     }
 
