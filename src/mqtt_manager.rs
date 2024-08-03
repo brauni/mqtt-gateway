@@ -1,12 +1,11 @@
-use chrono::{DateTime, Local};
 use log::{debug, error, info, warn};
 use paho_mqtt::{self as mqtt, AsyncClient, ConnectOptions, Message, Receiver};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-use crate::sensor_manager::{self, SensorManager};
+use crate::sensor_manager::SensorManager;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct MqttClientConfig {
@@ -77,6 +76,16 @@ impl MqttClient {
         Ok(receiver)
     }
 
+    fn reconnect(&self) -> Result<(), mqtt::Error> {
+        self.client
+            .reconnect_with_callbacks(
+                MqttClient::on_connect_succeeded,
+                MqttClient::on_connect_failed,
+            )
+            .wait_for(TIMEOUT)?;
+        Ok(())
+    }
+
     fn on_connect_succeeded(client: &AsyncClient, _: u16) {
         info!("{} connection succeeded", client.client_id());
         client.subscribe("#", 1);
@@ -138,6 +147,13 @@ impl MqttManager {
             client.disconnect()?;
         }
         Ok(())
+    }
+
+    pub fn reconnect(&self, client_id: String) {
+        let client = self.clients.get(&client_id).unwrap();
+        if let Err(e) = client.reconnect() {
+            error!("{} error reconnect: {:?}", client_id, e);
+        }
     }
 
     pub fn received_sensor_temperature(

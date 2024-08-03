@@ -96,7 +96,10 @@ fn main() {
             match receiver.1.try_recv() {
                 Ok(msg) => match msg {
                     Some(m) => received_mqtt_message(m, receiver.0.to_string(), &mut mqtt_manager),
-                    None => warn!("Received NONE msg on {}", receiver.0),
+                    None => {
+                        warn!("Received NONE msg on {}", receiver.0);
+                        mqtt_manager.reconnect(receiver.0.to_string());
+                    }
                 },
                 Err(_) => {}
             }
