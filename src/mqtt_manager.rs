@@ -77,6 +77,7 @@ impl MqttClient {
     }
 
     fn reconnect(&self) -> Result<(), mqtt::Error> {
+        info!("{} reconnecting", self.client.client_id());
         self.client
             .reconnect_with_callbacks(
                 MqttClient::on_connect_succeeded,

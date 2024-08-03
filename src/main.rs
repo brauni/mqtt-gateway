@@ -76,20 +76,15 @@ fn received_mqtt_message(msg: Message, client_id: String, mqtt_manager: &mut Mqt
 fn main() {
     std::env::set_var("RUST_LOG", "info");
     env_logger::init();
-    debug!("ThreadId: {}", thread_id::get());
 
     let clients_config =
         load_mqtt_client_config().expect("Error loading mqtt client config from config.json!");
 
     let mut mqtt_manager = mqtt_manager::MqttManager::new();
-    mqtt_manager.add_clients_from_config(clients_config);
-    let receivers = mqtt_manager.connect_all().unwrap();
 
-    // ctrlc::set_handler(move || {
-    //     thread::sleep(Duration::from_millis(100));
-    //     process::exit(0);
-    // })
-    // .expect("Error setting Ctrl-C handler");
+    mqtt_manager.add_clients_from_config(clients_config);
+
+    let receivers = mqtt_manager.connect_all().unwrap();
 
     loop {
         for receiver in receivers.iter() {
