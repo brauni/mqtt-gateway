@@ -89,7 +89,10 @@ fn received_mqtt_message(msg: Message, client_id: String, mqtt_manager: &mut Mqt
             unknown_cmd => error!("Received unknown command: {}", unknown_cmd),
         }
     } else {
-        info!("{}: {} - {}", client_id, topic, payload_str);
+        match payload_str.len() < 50 {
+            true => info!("{}: {} - {}", client_id, topic, payload_str),
+            false => info!("{}: {} - len {}", client_id, topic, payload_str.len()),
+        }
     }
 }
 
