@@ -71,15 +71,7 @@ fn received_mqtt_message(msg: Message, client_id: String, mqtt_manager: &mut Mqt
     let payload_str = msg.payload_str();
 
     if topic.starts_with("sensor/temperature") {
-        let datetime: DateTime<Local> = SystemTime::now().into();
-        info!(
-            "{}: {} - {} {}",
-            client_id,
-            topic,
-            payload_str,
-            datetime.format("%H:%M:%S")
-        );
-        debug!("ThreadId: {}", thread_id::get());
+        info!("{}: {} - {}", client_id, topic, payload_str);
         received_sensor_temperature(client_id, payload_str.into_owned(), topic, mqtt_manager);
     } else if topic.starts_with("datalogger/temperature/command") {
         info!("{}: {} - {}", client_id, topic, payload_str);
