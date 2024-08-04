@@ -6,14 +6,11 @@ use log::{debug, error, info, warn};
 use mqtt_manager::{MqttClientConfigs, MqttManager};
 use paho_mqtt::Message;
 use std::{
-    error::Error,
-    fs, io,
+    fs,
     path::{Path, PathBuf},
     thread,
     time::{Duration, SystemTime},
 };
-
-const DB_TEMPERATURE: &str = "temperature.db";
 
 fn load_mqtt_client_config() -> Result<MqttClientConfigs, serde_json::Error> {
     let config = fs::read_to_string("config.json").expect("Unable to read config.json!");
@@ -99,7 +96,8 @@ fn received_mqtt_message(msg: Message, client_id: String, mqtt_manager: &mut Mqt
 fn main() {
     std::env::set_var("RUST_LOG", "info");
     env_logger::init();
-    println!("{}", std::env::consts::OS);
+    info!("OS: {}", std::env::consts::OS);
+
     let clients_config =
         load_mqtt_client_config().expect("Error loading mqtt client config from config.json!");
 
