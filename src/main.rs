@@ -6,7 +6,10 @@ use log::{debug, error, info, warn};
 use mqtt_manager::{MqttClientConfigs, MqttManager};
 use paho_mqtt::Message;
 use std::{
-    fs, thread,
+    error::Error,
+    fs, io,
+    path::{Path, PathBuf},
+    thread,
     time::{Duration, SystemTime},
 };
 
@@ -20,10 +23,24 @@ fn load_mqtt_client_config() -> Result<MqttClientConfigs, serde_json::Error> {
     return Ok(clients);
 }
 
-fn write_value_to_database(value: f64, table_name: String, db_path: &str) {
-    info!("Writing to DB {} - {}", value, table_name);
+fn get_database_path() -> Result<String, std::io::Error> {
+    let mut usb_drive_path = PathBuf::new();
+    if std::env::consts::OS == "linux" {
+        usb_drive_path = Path::new("/media/pi/").to_path_buf();
+    } else if std::env::consts::OS == "windows" {
+        usb_drive_path = std::env::current_dir()?.join("usb_drive");
+    }
 
-    let db_connection = sqlite::open(db_path).unwrap();
+    let dir = fs::read_dir(usb_drive_path.clone())?.next().unwrap()?;
+    usb_drive_path = usb_drive_path.join(dir.path());
+
+    return Ok(usb_drive_path.display().to_string());
+}
+
+fn write_value_to_database(value: f64, table_name: String, db_file_path: &str) {
+    info!("Writing to DB {}: {} - {}", db_file_path, value, table_name);
+
+    let db_connection = sqlite::open(db_file_path).unwrap();
     let query = format!("CREATE TABLE IF NOT EXISTS {} (id INT AUTO_INCREMENT PRIMARY KEY, Value FLOAT, TimeStamp DATETIME DEFAULT (datetime('now','localtime')))", table_name);
     db_connection.execute(query).unwrap();
 
@@ -42,7 +59,13 @@ fn received_sensor_temperature(
     let sensor_id = collection[1].to_owned();
     let table_name: String = "tb_".to_owned() + &sensor_id;
 
-    write_value_to_database(value, table_name, DB_TEMPERATURE);
+    match get_database_path() {
+        Ok(db_path) => {
+            let db_file_path = db_path + "/" + &client_id + ".db";
+            write_value_to_database(value, table_name, &db_file_path);
+        }
+        Err(e) => error!("Error getting DB path: {:?}", e),
+    }
     mqtt_manager.received_sensor_temperature(client_id, sensor_id, value, topic)
 }
 
@@ -76,7 +99,7 @@ fn received_mqtt_message(msg: Message, client_id: String, mqtt_manager: &mut Mqt
 fn main() {
     std::env::set_var("RUST_LOG", "info");
     env_logger::init();
-
+    println!("{}", std::env::consts::OS);
     let clients_config =
         load_mqtt_client_config().expect("Error loading mqtt client config from config.json!");
 
