@@ -38,10 +38,10 @@ fn load_usb_drive_path_config(config: &str) -> String {
     return usb_drive_path;
 }
 
-fn get_database_path() -> Result<String, std::io::Error> {
+fn get_database_path(usb_drive: &str) -> Result<String, std::io::Error> {
     let mut usb_drive_path = PathBuf::new();
     if std::env::consts::OS == "linux" {
-        usb_drive_path = Path::new("/media/pi/").to_path_buf();
+        usb_drive_path = Path::new(usb_drive).to_path_buf();
     } else if std::env::consts::OS == "windows" {
         usb_drive_path = std::env::current_dir()?.join("usb_drive");
     }
@@ -68,13 +68,14 @@ fn received_sensor_temperature(
     payload_str: String,
     topic: String,
     mqtt_manager: &mut MqttManager,
+    usb_drive_path: &str,
 ) {
     let collection: Vec<&str> = payload_str.split("#").collect();
     let value: f64 = collection[0].parse().unwrap();
     let sensor_id = collection[1].to_owned();
     let table_name: String = "tb_".to_owned() + &sensor_id;
 
-    match get_database_path() {
+    match get_database_path(usb_drive_path) {
         Ok(db_path) => {
             let db_file_path = db_path + "/" + &client_id + ".db";
             write_value_to_database(value, table_name, &db_file_path);
@@ -84,13 +85,24 @@ fn received_sensor_temperature(
     mqtt_manager.received_sensor_temperature(client_id, sensor_id, value, topic)
 }
 
-fn received_mqtt_message(msg: Message, client_id: String, mqtt_manager: &mut MqttManager) {
+fn received_mqtt_message(
+    msg: Message,
+    client_id: String,
+    mqtt_manager: &mut MqttManager,
+    usb_drive_path: &str,
+) {
     let topic = msg.topic().to_owned();
     let payload_str = msg.payload_str();
 
     if topic.starts_with("sensor/temperature") {
         info!("{}: {} - {}", client_id, topic, payload_str);
-        received_sensor_temperature(client_id, payload_str.into_owned(), topic, mqtt_manager);
+        received_sensor_temperature(
+            client_id,
+            payload_str.into_owned(),
+            topic,
+            mqtt_manager,
+            usb_drive_path,
+        );
     } else if topic.starts_with("datalogger/temperature/command") {
         info!("{}: {} - {}", client_id, topic, payload_str);
         match payload_str.as_ref() {
@@ -123,7 +135,12 @@ fn main() {
         for receiver in receivers.iter() {
             match receiver.1.try_recv() {
                 Ok(msg) => match msg {
-                    Some(m) => received_mqtt_message(m, receiver.0.to_string(), &mut mqtt_manager),
+                    Some(m) => received_mqtt_message(
+                        m,
+                        receiver.0.to_string(),
+                        &mut mqtt_manager,
+                        &usb_drive_path,
+                    ),
                     None => {
                         warn!("Received NONE msg on {}", receiver.0);
                         mqtt_manager.reconnect(receiver.0.to_string());
