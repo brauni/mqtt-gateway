@@ -9,15 +9,33 @@ use std::{
     fs,
     path::{Path, PathBuf},
     thread,
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
-fn load_mqtt_client_config() -> Result<MqttClientConfigs, serde_json::Error> {
+fn load_config() -> (MqttClientConfigs, String) {
     let config = fs::read_to_string("config.json").expect("Unable to read config.json!");
     info!("{}", config);
 
-    let clients: MqttClientConfigs = serde_json::from_str(&config).unwrap();
+    let client_configs = load_mqtt_client_config(&config).unwrap();
+
+    let usb_drive_path = load_usb_drive_path_config(&config);
+
+    return (client_configs, usb_drive_path);
+}
+
+fn load_mqtt_client_config(config: &str) -> Result<MqttClientConfigs, serde_json::Error> {
+    let clients: MqttClientConfigs = serde_json::from_str(config)?;
     return Ok(clients);
+}
+
+fn load_usb_drive_path_config(config: &str) -> String {
+    let usb_drive_path: String;
+    match serde_json::from_str::<serde_json::Value>(config) {
+        Ok(path) => usb_drive_path = path["usb_drive_path"].to_string(),
+        Err(_) => usb_drive_path = "".to_owned(),
+    }
+    info!("usb_drive_path: {}", usb_drive_path);
+    return usb_drive_path;
 }
 
 fn get_database_path() -> Result<String, std::io::Error> {
@@ -93,8 +111,7 @@ fn main() {
     env_logger::init();
     info!("OS: {}", std::env::consts::OS);
 
-    let clients_config =
-        load_mqtt_client_config().expect("Error loading mqtt client config from config.json!");
+    let (clients_config, usb_drive_path) = load_config();
 
     let mut mqtt_manager = mqtt_manager::MqttManager::new();
 
