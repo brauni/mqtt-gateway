@@ -1,5 +1,6 @@
 # mqtt-gateway
-The mqtt-gateway creates mqtt-clients that are configured in a `config.json` file and subscribes on all clients to the wildcard topic `"#"` to receive all messages. The `config.json` should look like the following:
+The mqtt-gateway is designed to run on a light weight single board computer like the Raspberry Pi Zero W.
+It creates mqtt-clients that are configured in a `config.json` file and subscribes on all clients to the wildcard topic `"#"` to receive all messages. The `config.json` should look like the following:
 ```
 {
     "mqtt_clients":[
@@ -17,10 +18,11 @@ The mqtt-gateway creates mqtt-clients that are configured in a `config.json` fil
           "user":"user2",
           "password":"pw2"
        }
-    ]
+    ],
+    "usb_drive_path":"/media/usb"
  }
 ```
 
 The main features of the mqtt-gateway are:
-- Receive data from temperature sensors under the topic `"sensor/temperature/"` and write them to an SQLite database
+- Receive data from temperature sensors under the topic `"sensor/temperature/"` and write them to an SQLite database on an usb drive, located at `"usb_drive_path"` in `config.json`. 
 - On receiveing a `"get"` command under the topic `"datalogger/temperature"` repeat all stored and valid temperature sensor values under the same topic.
