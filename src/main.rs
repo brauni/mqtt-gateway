@@ -1,16 +1,66 @@
 mod mqtt_manager;
 mod sensor_manager;
 
-use chrono::{DateTime, Local};
-use log::{debug, error, info, warn};
+use log::{debug, error, info, warn, LevelFilter};
+use log4rs::{
+    append::{console::ConsoleAppender, file::FileAppender},
+    config::{Appender, Logger, Root},
+    encode::pattern::PatternEncoder,
+    Config,
+};
 use mqtt_manager::{MqttClientConfigs, MqttManager};
-use paho_mqtt::Message;
+use paho_mqtt::{Message, Value};
 use std::{
     fs,
     path::{Path, PathBuf},
     thread,
     time::Duration,
 };
+
+fn init_logger() -> log4rs::Handle {
+    let stdout = ConsoleAppender::builder().build();
+
+    let file = FileAppender::builder()
+        .encoder(Box::new(PatternEncoder::new("{d} - {m}{n}")))
+        .build("log/requests.log")
+        .unwrap();
+
+    let config = Config::builder()
+        .appender(Appender::builder().build("stdout", Box::new(stdout)))
+        .appender(Appender::builder().build("file", Box::new(file)))
+        .build(Root::builder().appender("stdout").build(LevelFilter::Info))
+        .unwrap();
+
+    return log4rs::init_config(config).unwrap();
+}
+
+fn update_log_file_path(handle: &log4rs::Handle, usb_drive_path: String) {
+    if usb_drive_path.is_empty() {
+        warn!("No path defined for logfile");
+        return;
+    }
+
+    let stdout = ConsoleAppender::builder().build();
+
+    let file = FileAppender::builder()
+        //.encoder(Box::new(PatternEncoder::new("{d} {l} - {m}{n}")))
+        .build(usb_drive_path + "mqtt-gateway.log")
+        .unwrap();
+
+    let config = Config::builder()
+        .appender(Appender::builder().build("stdout", Box::new(stdout)))
+        .appender(Appender::builder().build("file", Box::new(file)))
+        .logger(
+            Logger::builder()
+                .appender("file")
+                .additive(true)
+                .build("mqtt_gateway", LevelFilter::Info),
+        )
+        .build(Root::builder().appender("stdout").build(LevelFilter::Info))
+        .unwrap();
+
+    handle.set_config(config);
+}
 
 fn load_config() -> (MqttClientConfigs, String) {
     let config = fs::read_to_string("config.json").expect("Unable to read config.json!");
@@ -28,11 +78,15 @@ fn load_mqtt_client_config(config: &str) -> Result<MqttClientConfigs, serde_json
     return Ok(clients);
 }
 
+/// Returns the usb_drive_path defined in config.json as String. Returns empty String if no path is defined.
 fn load_usb_drive_path_config(config: &str) -> String {
-    let usb_drive_path: String;
+    let mut usb_drive_path: String = "".to_owned();
     match serde_json::from_str::<serde_json::Value>(config) {
-        Ok(path) => usb_drive_path = path["usb_drive_path"].to_string(),
-        Err(_) => usb_drive_path = "".to_owned(),
+        Ok(path) => match path["usb_drive_path"].as_str() {
+            Some(drive_path) => usb_drive_path = drive_path.to_string(),
+            None => warn!("No usb_drive_path defined"),
+        },
+        Err(_) => error!("Could not open config.json!"),
     }
     info!("usb_drive_path: {}", usb_drive_path);
     return usb_drive_path;
@@ -40,11 +94,8 @@ fn load_usb_drive_path_config(config: &str) -> String {
 
 fn get_database_path(usb_drive: &str) -> Result<String, std::io::Error> {
     let mut usb_drive_path = PathBuf::new();
-    if std::env::consts::OS == "linux" {
-        usb_drive_path = Path::new(usb_drive).to_path_buf();
-    } else if std::env::consts::OS == "windows" {
-        usb_drive_path = std::env::current_dir()?.join("usb_drive");
-    }
+
+    usb_drive_path = Path::new(usb_drive).to_path_buf();
 
     let dir = fs::read_dir(usb_drive_path.clone())?.next().unwrap()?;
     usb_drive_path = usb_drive_path.join(dir.path());
@@ -119,11 +170,13 @@ fn received_mqtt_message(
 }
 
 fn main() {
-    std::env::set_var("RUST_LOG", "info");
-    env_logger::init();
-    info!("OS: {}", std::env::consts::OS);
+    let handle = init_logger();
 
     let (clients_config, usb_drive_path) = load_config();
+
+    update_log_file_path(&handle, usb_drive_path.clone());
+
+    info!("OS: {}", std::env::consts::OS);
 
     let mut mqtt_manager = mqtt_manager::MqttManager::new();
 
