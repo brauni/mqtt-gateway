@@ -1,15 +1,14 @@
 mod mqtt_manager;
 mod sensor_manager;
 
-use log::{debug, error, info, warn, LevelFilter};
+use log::{error, info, warn, LevelFilter};
 use log4rs::{
     append::{console::ConsoleAppender, file::FileAppender},
     config::{Appender, Logger, Root},
-    encode::pattern::PatternEncoder,
     Config,
 };
 use mqtt_manager::{MqttClientConfigs, MqttManager};
-use paho_mqtt::{Message, Receiver, Value};
+use paho_mqtt::{Message, Receiver};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -28,17 +27,27 @@ fn init_logger() -> log4rs::Handle {
     return log4rs::init_config(config).unwrap();
 }
 
-fn update_log_file_path(handle: &log4rs::Handle, usb_drive_path: String) {
-    if usb_drive_path.is_empty() {
-        warn!("No path defined for logfile");
+fn update_log_file_path(handle: &log4rs::Handle, mount_point: String) {
+    if mount_point.is_empty() {
+        warn!("No mount point defined for logfile");
         return;
+    }
+
+    let log_file_path: String;
+    match get_usb_drive_path(&mount_point) {
+        Ok(log_path) => {
+            log_file_path = log_path + "/mqtt-gateway.log";
+            info!("log_file_path: {}", log_file_path);
+        }
+        Err(e) => {
+            error!("Error getting usb drive path for log: {:?}", e);
+            return;
+        }
     }
 
     let stdout = ConsoleAppender::builder().build();
 
-    let file = FileAppender::builder()
-        .build(usb_drive_path + "mqtt-gateway.log")
-        .unwrap();
+    let file = FileAppender::builder().build(log_file_path).unwrap();
 
     let config = Config::builder()
         .appender(Appender::builder().build("stdout", Box::new(stdout)))
@@ -61,9 +70,9 @@ fn load_config() -> (MqttClientConfigs, String) {
 
     let client_configs = load_mqtt_client_config(&config).unwrap();
 
-    let usb_drive_path = load_usb_drive_path_config(&config);
+    let mount_point = load_mount_point_config(&config);
 
-    return (client_configs, usb_drive_path);
+    return (client_configs, mount_point);
 }
 
 fn load_mqtt_client_config(config: &str) -> Result<MqttClientConfigs, serde_json::Error> {
@@ -71,21 +80,21 @@ fn load_mqtt_client_config(config: &str) -> Result<MqttClientConfigs, serde_json
     return Ok(clients);
 }
 
-/// Returns the usb_drive_path defined in config.json as String. Returns empty String if no path is defined.
-fn load_usb_drive_path_config(config: &str) -> String {
-    let mut usb_drive_path: String = "".to_owned();
+/// Returns the mount point for usb drives defined in config.json as String. Returns empty String if no path is defined.
+fn load_mount_point_config(config: &str) -> String {
+    let mut mount_point: String = "".to_owned();
     match serde_json::from_str::<serde_json::Value>(config) {
-        Ok(path) => match path["usb_drive_path"].as_str() {
-            Some(drive_path) => usb_drive_path = drive_path.to_string(),
-            None => warn!("No usb_drive_path defined"),
+        Ok(path) => match path["mount_point"].as_str() {
+            Some(drive_path) => mount_point = drive_path.to_string(),
+            None => warn!("No mount_point defined"),
         },
         Err(_) => error!("Could not open config.json!"),
     }
-    info!("usb_drive_path: {}", usb_drive_path);
-    return usb_drive_path;
+    info!("mount_point: {}", mount_point);
+    return mount_point;
 }
 
-fn get_database_path(usb_drive: &str) -> Result<String, std::io::Error> {
+fn get_usb_drive_path(usb_drive: &str) -> Result<String, std::io::Error> {
     let mut usb_drive_path = PathBuf::new();
 
     usb_drive_path = Path::new(usb_drive).to_path_buf();
@@ -108,13 +117,17 @@ fn insert_value_to_table(value: f64, table_name: String, db_file_path: &str) {
     db_connection.execute(insert).unwrap();
 }
 
-fn write_value_to_database(value: f64, usb_drive_path: &str, table_name: String, client_id: &str) {
-    match get_database_path(usb_drive_path) {
+fn write_value_to_database(value: f64, mount_point: &str, table_name: String, client_id: &str) {
+    if mount_point.is_empty() {
+        warn!("No mount point defined for DB");
+        return;
+    }
+    match get_usb_drive_path(mount_point) {
         Ok(db_path) => {
             let db_file_path = db_path + "/" + client_id + ".db";
             insert_value_to_table(value, table_name, &db_file_path);
         }
-        Err(e) => error!("Error getting DB path: {:?}", e),
+        Err(e) => error!("Error getting usb drive path for DB: {:?}", e),
     }
 }
 
@@ -123,14 +136,14 @@ fn received_sensor_temperature(
     payload_str: String,
     topic: String,
     mqtt_manager: &mut MqttManager,
-    usb_drive_path: &str,
+    mount_point: &str,
 ) {
     let collection: Vec<&str> = payload_str.split("#").collect();
     let value: f64 = collection[0].parse().unwrap();
     let sensor_id = collection[1].to_owned();
     let table_name: String = "tb_".to_owned() + &sensor_id;
 
-    write_value_to_database(value, usb_drive_path, table_name, &client_id);
+    write_value_to_database(value, mount_point, table_name, &client_id);
     mqtt_manager.received_sensor_temperature(client_id, sensor_id, value, topic)
 }
 
@@ -138,7 +151,7 @@ fn received_mqtt_message(
     msg: Message,
     client_id: String,
     mqtt_manager: &mut MqttManager,
-    usb_drive_path: &str,
+    mount_point: &str,
 ) {
     let topic = msg.topic().to_owned();
     let payload_str = msg.payload_str();
@@ -150,7 +163,7 @@ fn received_mqtt_message(
             payload_str.into_owned(),
             topic,
             mqtt_manager,
-            usb_drive_path,
+            mount_point,
         );
     } else if topic.starts_with("datalogger/temperature/command") {
         info!("{}: {} - {}", client_id, topic, payload_str);
@@ -169,14 +182,12 @@ fn received_mqtt_message(
 
 fn receive_non_blocking(
     receiver: (&String, &Receiver<Option<Message>>),
-    usb_drive_path: &str,
+    mount_point: &str,
     mqtt_manager: &mut MqttManager,
 ) {
     match receiver.1.try_recv() {
         Ok(msg) => match msg {
-            Some(m) => {
-                received_mqtt_message(m, receiver.0.to_string(), mqtt_manager, &usb_drive_path)
-            }
+            Some(m) => received_mqtt_message(m, receiver.0.to_string(), mqtt_manager, &mount_point),
             None => {
                 warn!("Received NONE msg on {}, trying to reconnect", receiver.0);
                 mqtt_manager.reconnect(receiver.0.to_string());
@@ -187,11 +198,11 @@ fn receive_non_blocking(
 }
 
 fn main() {
-    let handle = init_logger();
+    let logger = init_logger();
 
-    let (clients_config, usb_drive_path) = load_config();
+    let (clients_config, mount_point) = load_config();
 
-    update_log_file_path(&handle, usb_drive_path.clone());
+    update_log_file_path(&logger, mount_point.clone());
 
     info!("OS: {}", std::env::consts::OS);
 
@@ -203,7 +214,7 @@ fn main() {
 
     loop {
         for receiver in receivers.iter() {
-            receive_non_blocking(receiver, &usb_drive_path, &mut mqtt_manager)
+            receive_non_blocking(receiver, &mount_point, &mut mqtt_manager)
         }
         thread::sleep(Duration::from_millis(100));
     }

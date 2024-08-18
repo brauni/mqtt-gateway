@@ -49,7 +49,7 @@ impl MqttClient {
 
         let create_opts = mqtt::CreateOptionsBuilder::new()
             .server_uri(config.address.to_string())
-            .client_id(config.name.to_string())
+            .client_id(config.name.to_string() + "_gw")
             .user_data(Box::new(conn_opts))
             .finalize();
 
