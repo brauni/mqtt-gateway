@@ -1,9 +1,10 @@
+use chrono::DateTime;
 use log::{debug, error, info, warn};
 use paho_mqtt::{self as mqtt, AsyncClient, ConnectOptions, Message, Receiver};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::sensor_manager::SensorManager;
 
@@ -47,9 +48,10 @@ impl MqttClient {
             .password(config.password.to_string())
             .finalize();
 
+        let timestamp: DateTime<chrono::Local> = SystemTime::now().into();
         let create_opts = mqtt::CreateOptionsBuilder::new()
             .server_uri(config.address.to_string())
-            .client_id(config.name.to_string() + "_gw")
+            .client_id(config.name.to_string() + "_gw_" + &timestamp.format("%M%S").to_string())
             .user_data(Box::new(conn_opts))
             .finalize();
 
