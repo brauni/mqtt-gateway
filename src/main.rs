@@ -172,6 +172,12 @@ fn received_mqtt_message(
             "get_valid" => warn!("get_valid not yet implemented!"),
             unknown_cmd => error!("Received unknown command: {}", unknown_cmd),
         }
+    } else if topic.starts_with("datalogger/command") {
+        info!("{}: {} - {}", client_id, topic, payload_str);
+        match payload_str.as_ref() {
+            "ping" => mqtt_manager.publish_ping(client_id),
+            unknown_cmd => error!("Received unknown command: {}", unknown_cmd),
+        }
     } else {
         match payload_str.len() < 50 {
             true => info!("{}: {} - {}", client_id, topic, payload_str),

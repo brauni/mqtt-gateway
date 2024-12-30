@@ -26,3 +26,8 @@ It creates mqtt-clients that are configured in a `config.json` file and subscrib
 The main features of the mqtt-gateway are:
 - Receive data from temperature sensors under the topic `"sensor/temperature/"` and write them to an SQLite database on an usb drive, located at `"usb_drive_path"` in `config.json`. 
 - On receiveing a `"get"` command under the topic `"datalogger/temperature"` repeat all stored and valid temperature sensor values under the same topic.
+
+
+Build for Raspberry-Pi Zero using Cross
+Install docker engine.
+Use command  `"cross run --target arm-unknown-linux-gnueabihf"` to build for raspberry-pi zero target.

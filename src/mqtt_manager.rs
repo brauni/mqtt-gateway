@@ -179,8 +179,8 @@ impl MqttManager {
             info!(
                 "Publishing on {}: {} - {}",
                 client_id,
-                sensor.get_encoded_string(),
-                topic
+                topic,
+                sensor.get_encoded_string()
             );
             let msg = mqtt::MessageBuilder::new()
                 .topic(topic)
@@ -191,6 +191,23 @@ impl MqttManager {
             if let Err(e) = client.client.try_publish(msg) {
                 error!("{} error publishing message: {:?}", client_id, e);
             }
+        }
+    }
+
+    pub fn publish_ping(&self, client_id: String) {
+        let client = self.clients.get(&client_id).unwrap();
+        let topic = "datalogger/ping/ack";
+        let payload = "GW-ID";
+
+        info!("Publishing on {}: {} - {}", client_id, topic, payload);
+        let msg = mqtt::MessageBuilder::new()
+            .topic(topic)
+            .payload(payload)
+            .qos(1)
+            .finalize();
+
+        if let Err(e) = client.client.try_publish(msg) {
+            error!("{} error publishing message: {:?}", client_id, e);
         }
     }
 }
