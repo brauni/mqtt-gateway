@@ -1,7 +1,7 @@
 mod mqtt_manager;
 mod sensor_manager;
 
-use log::{error, info, warn, LevelFilter};
+use log::{debug, error, info, warn, LevelFilter};
 use log4rs::{
     append::{console::ConsoleAppender, file::FileAppender},
     config::{Appender, Logger, Root},
@@ -64,7 +64,7 @@ fn update_log_file_path(handle: &log4rs::Handle, mount_point: String) {
     handle.set_config(config);
 }
 
-fn load_config() -> (MqttClientConfigs, String) {
+fn load_config() -> (MqttClientConfigs, String, String) {
     let config = fs::read_to_string("config.json").expect("Unable to read config.json!");
     info!("{}", config);
 
@@ -72,7 +72,22 @@ fn load_config() -> (MqttClientConfigs, String) {
 
     let mount_point = load_mount_point_config(&config);
 
-    return (client_configs, mount_point);
+    let name = load_name(&config);
+
+    return (client_configs, mount_point, name);
+}
+
+fn load_name(config: &str) -> String {
+    let mut name: String = "".to_owned();
+    match serde_json::from_str::<serde_json::Value>(config) {
+        Ok(config) => match config["name"].as_str() {
+            Some(value) => name = value.to_string(),
+            None => warn!("No mount_point defined"),
+        },
+        Err(_) => error!("Could not open config.json!"),
+    }
+    info!("name: {}", name);
+    return name;
 }
 
 fn load_mqtt_client_config(config: &str) -> Result<MqttClientConfigs, serde_json::Error> {
@@ -152,6 +167,7 @@ fn received_mqtt_message(
     client_id: String,
     mqtt_manager: &mut MqttManager,
     mount_point: &str,
+    name: &str,
 ) {
     let topic = msg.topic().to_owned();
     let payload_str = msg.payload_str();
@@ -175,13 +191,14 @@ fn received_mqtt_message(
     } else if topic.starts_with("datalogger/command") {
         info!("{}: {} - {}", client_id, topic, payload_str);
         match payload_str.as_ref() {
-            "ping" => mqtt_manager.publish_ping(client_id),
+            "ping" => mqtt_manager.publish_ping_ack(client_id, &name),
             unknown_cmd => error!("Received unknown command: {}", unknown_cmd),
         }
     } else {
+        warn!("Received unknown topic!");
         match payload_str.len() < 50 {
-            true => info!("{}: {} - {}", client_id, topic, payload_str),
-            false => info!("{}: {} - len {}", client_id, topic, payload_str.len()),
+            true => debug!("{}: {} - {}", client_id, topic, payload_str),
+            false => debug!("{}: {} - len {}", client_id, topic, payload_str.len()),
         }
     }
 }
@@ -190,10 +207,13 @@ fn receive_non_blocking(
     receiver: (&String, &Receiver<Option<Message>>),
     mount_point: &str,
     mqtt_manager: &mut MqttManager,
+    name: &str,
 ) {
     match receiver.1.try_recv() {
         Ok(msg) => match msg {
-            Some(m) => received_mqtt_message(m, receiver.0.to_string(), mqtt_manager, &mount_point),
+            Some(m) => {
+                received_mqtt_message(m, receiver.0.to_string(), mqtt_manager, &mount_point, &name);
+            }
             None => {
                 warn!("Received NONE msg on {}, trying to reconnect", receiver.0);
                 mqtt_manager.reconnect(receiver.0.to_string());
@@ -206,7 +226,7 @@ fn receive_non_blocking(
 fn main() {
     let logger = init_logger();
 
-    let (clients_config, mount_point) = load_config();
+    let (clients_config, mount_point, name) = load_config();
 
     update_log_file_path(&logger, mount_point.clone());
 
@@ -220,7 +240,7 @@ fn main() {
 
     loop {
         for receiver in receivers.iter() {
-            receive_non_blocking(receiver, &mount_point, &mut mqtt_manager)
+            receive_non_blocking(receiver, &mount_point, &mut mqtt_manager, &name)
         }
         thread::sleep(Duration::from_millis(100));
     }

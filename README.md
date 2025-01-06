@@ -1,8 +1,9 @@
 # mqtt-gateway
 The mqtt-gateway is designed to run on a light weight single board computer like the Raspberry Pi Zero W.
-It creates mqtt-clients that are configured in a `config.json` file and subscribes on all clients to the wildcard topic `"#"` to receive all messages. The `config.json` should look like the following:
+It creates mqtt-clients that are configured in a `config.json` file and subscribes on all clients to relevant topics to receive datalogger commands and sensor data. The `config.json` should look like the following:
 ```
 {
+    "name":"NameOfGateway",
     "mqtt_clients":[
        {
           "name":"Client1",
@@ -13,7 +14,7 @@ It creates mqtt-clients that are configured in a `config.json` file and subscrib
        },
        {
           "name":"Client2",
-          "address":"clientaddress1.com:122",
+          "address":"clientaddress2.com:122",
           "port":122,
           "user":"user2",
           "password":"pw2"
@@ -28,6 +29,6 @@ The main features of the mqtt-gateway are:
 - On receiveing a `"get"` command under the topic `"datalogger/temperature"` repeat all stored and valid temperature sensor values under the same topic.
 
 
-Build for Raspberry-Pi Zero using Cross
-Install docker engine.
-Use command  `"cross run --target arm-unknown-linux-gnueabihf"` to build for raspberry-pi zero target.
+### Build for Raspberry-Pi Zero using Cross
+Install docker engine and [cross](https://github.com/cross-rs/cross).\
+Use command  `cross run --target arm-unknown-linux-gnueabihf` to build for Raspberry Pi Zero target.

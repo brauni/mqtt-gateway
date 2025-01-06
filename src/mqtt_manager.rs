@@ -91,7 +91,13 @@ impl MqttClient {
 
     fn on_connect_succeeded(client: &AsyncClient, _: u16) {
         info!("{} connection succeeded", client.client_id());
-        client.subscribe("#", 1);
+        let topics = [
+            "datalogger/command/#",
+            "datalogger/temperature/command",
+            "sensor/temperature/#",
+        ];
+        let qos = [1, 1, 1];
+        client.subscribe_many(&topics, &qos);
     }
 
     fn on_connect_failed(client: &AsyncClient, _: u16, rc: i32) {
@@ -194,10 +200,10 @@ impl MqttManager {
         }
     }
 
-    pub fn publish_ping(&self, client_id: String) {
+    pub fn publish_ping_ack(&self, client_id: String, name: &str) {
         let client = self.clients.get(&client_id).unwrap();
         let topic = "datalogger/ping/ack";
-        let payload = "GW-ID";
+        let payload = name;
 
         info!("Publishing on {}: {} - {}", client_id, topic, payload);
         let msg = mqtt::MessageBuilder::new()
